@@ -206,7 +206,7 @@ class AnchorChecker():
         out_file_template = self.date.strftime('%Y%m%d') + '.{name}.csv'
         for name, data in [
             ('failing-measurements-to-connected-anchors', self.make_df(self.failing_measurements_to_connected_anchors)),
-            ('succeeding-measurements-to-connected-anchors', self.make_df(self.succeeding_measurements_to_nonconnected_anchors)),
+            ('succeeding-measurements-to-nonconnected-anchors', self.make_df(self.succeeding_measurements_to_nonconnected_anchors)),
             ('failing-measurements-to-nonconnected-anchors', self.make_df(self.failing_measurements_to_nonconnected_anchors)),
             ('measurements-to-unknown-anchors', self.make_df(self.measurements_to_unknown_anchors)),
             ('disconnected-anchors', self.disconnected_anchors)
@@ -222,7 +222,7 @@ class AnchorChecker():
             'date': self.date,
             'disconnected_anchors': len(self.disconnected_anchors),
             'failing_measurements_to_connected_anchors': len(self.failing_measurements_to_connected_anchors),
-            'succeeding_measurements_to_connected_anchors': len(self.succeeding_measurements_to_nonconnected_anchors),
+            'succeeding_measurements_to_nonconnected_anchors': len(self.succeeding_measurements_to_nonconnected_anchors),
             'failing_measurements_to_nonconnected_anchors': len(self.failing_measurements_to_nonconnected_anchors),
             'measurements_to_unknown_anchors': len(self.measurements_to_unknown_anchors)
         }
