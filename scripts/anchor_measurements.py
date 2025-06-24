@@ -13,6 +13,9 @@ from requests_futures.sessions import FuturesSession
 from urllib3.util import Retry
 
 API_BASE = 'https://atlas.ripe.net/api/v2'
+# Minimum number of results required for a measurement to be counted as successful.
+# There are probes that claim to always reach the target, which is why the number should
+# be greater than 1.
 SUCCESS_THRESHOLD = 3
 
 
@@ -20,24 +23,51 @@ class AnchorChecker():
     def __init__(self) -> None:
         self.stats_file = 'stats/anchor-measurements.csv'
         self.date = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Anchor ID (as used in the /anchors endpoint) to probe ID (/probes endpoint)
         self.anchor_id_to_prb_id = dict()
-        self.anchor_id_to_status = dict()
-        self.all_msm_ids = list()
-        self.msm_id_to_prb_id = dict()
+        # Reverse of above.
         self.prb_id_to_anchor_id = dict()
-        self.msm_id_is_mesh = dict()
+        # Anchor ID to connectivity status text
+        self.anchor_id_to_status = dict()
+        # All measurement IDs of the anchor measurements (as used in the /measurements
+        # endpoint, not /anchor-measurements)
+        self.all_msm_ids = list()
+        # Measurement ID to targeted anchor (as probe ID)
+        self.msm_id_to_prb_id = dict()
+        # If there is no anchor ID to probe ID mapping for an anchor, map the
+        # measurement ID to the anchor ID instead
         self.msm_id_to_unknown_anchor_id = dict()
+        # Measurement ID to is_mesh boolean from measurement metadata
+        self.msm_id_is_mesh = dict()
+        # Measurement IDs of ongoing measurements to their metadata. These are the
+        # measurements for which we fetch results.
+        # They are further subdivided by the next three members.
         self.ongoing_msm_id_to_metadata = dict()
+        # The next three map measurement ID to anchor ID (although the anchor ID is not
+        # used at the moment)
+        # Ongoing measurements to anchors, which have no entry in the /anchors endpoint
         self.ongoing_measurements_to_unknown_anchors = dict()
+        # Ongoing measurements to anchors that are not in the "Connected" state
         self.ongoing_measurements_to_nonconnected_anchors = dict()
+        # Ongoing measurements to connected anchors
         self.ongoing_measurements_to_connected_anchors = dict()
+        # Measurement ID to bool indicated if measurement succeeded (i.e., >=
+        # SUCCESS_THRESHOLD results) or not
         self.measurement_succeeded = dict()
+        # The next four members are lists of measurement IDs that require investigation.
+        # Measurements fail even though the target anchor is connected
         self.failing_measurements_to_connected_anchors = list()
+        # Measurements succeed even though the target anchor is disconnected
         self.succeeding_measurements_to_nonconnected_anchors = list()
+        # Measurements fail and the target anchor is disconnected. Expected behavior,
+        # but measurements should be stopped
         self.failing_measurements_to_nonconnected_anchors = list()
+        # Measurements to anchors without /anchors endpoint entry
         self.measurements_to_unknown_anchors = list()
+        # Keep track of disconnected anchors (using probe ID) and since when they are disconnected
         self.disconnected_anchors = pd.DataFrame()
 
+        # Fetch results in parallel. GitHub workers have 4 cores.
         self.session = FuturesSession(max_workers=4)
         retries = Retry(
             total=3,
@@ -48,6 +78,8 @@ class AnchorChecker():
 
     @staticmethod
     def handle_future(f: Future) -> list:
+        """Try to retrieve the result of the future, check the HTTP response and decode
+        JSON."""
         try:
             r: Response = f.result()
         except Exception as e:
@@ -62,18 +94,35 @@ class AnchorChecker():
         return r_json
 
     def fetch_url(self, url: str, params: dict = dict()):
+        """Fetch single URL and return decoded JSON result."""
         logging.debug(f'Fetching {url}')
         future = self.session.get(url, params=params)
         return self.handle_future(future)
 
     def fetch_url_with_params_in_parallel(self, url: str, params_list: list) -> Generator[list]:
+        """Fetch a single URL with multiple parameter sets in parallel.
+
+        The base URL is the same for all requests. Generate decoded JSON results.
+        Results can be empty in case of errors.
+
+        Args:
+            url (str): Base URL
+            params_list (list): List of parameter dictionaries
+
+        Yields:
+            Generator[list]: Decoded JSON results
+        """
         queries = list()
         for params in params_list:
             queries.append(self.session.get(url, params=params))
         for future in as_completed(queries):
             yield self.handle_future(future)
 
-    def get_paginated_url(self, url: str) -> list:
+    def fetch_paginated_url(self, url: str) -> list:
+        """Fetch a URL and follow the pagination until the end.
+
+        Return concatenated results.
+        """
         res = list()
         page = self.fetch_url(url, {'format': 'json', 'page_size': 500})
         if not page:
@@ -87,6 +136,18 @@ class AnchorChecker():
         return res
 
     def fetch_api_endpoint_by_ids(self, endpoint: str, ids: list) -> list:
+        """Fetch API endpoint with ID lists in parallel.
+
+        Each item in "ids" should be a list of IDs, which will be used for the id__in
+        parameter.
+
+        Args:
+            endpoint (str): API endpoint
+            ids (list): List of ID lists
+
+        Returns:
+            list: Decoded JSON results
+        """
         res = list()
         # Request URL gets too long if we include more ids, so no reason to use
         # pagination.
@@ -102,18 +163,22 @@ class AnchorChecker():
         return res
 
     def fetch_latest_measurement_results(self, msm_id: int) -> list:
-        page = self.fetch_url(f'https://atlas.ripe.net/api/v2/measurements/{msm_id}/latest',
+        """Fetch the /latest endpoint for the specified measurement ID."""
+        page = self.fetch_url(os.path.join(API_BASE, f'/measurements/{msm_id}/latest'),
                               {'format': 'json'},
                               )
         return page
 
     def process_anchor_metadata(self):
-        anchor_metadata = self.get_paginated_url(os.path.join(API_BASE, 'anchors'))
+        """Fetch metadata from /anchors endpoint and create anchor/probe ID mappings."""
+        anchor_metadata = self.fetch_paginated_url(os.path.join(API_BASE, 'anchors'))
         self.anchor_id_to_prb_id = {e['id']: e['probe'] for e in anchor_metadata}
         self.prb_id_to_anchor_id = {e['probe']: e['id'] for e in anchor_metadata}
 
     def process_anchor_measurements(self):
-        anchor_measurements = self.get_paginated_url(os.path.join(API_BASE, 'anchor-measurements'))
+        """Fetch /anchor-measurements endpoint, extract measurement IDs and the anchor
+        they target."""
+        anchor_measurements = self.fetch_paginated_url(os.path.join(API_BASE, 'anchor-measurements'))
         for entry in anchor_measurements:
             anchor_id = int(entry['target'].split('anchors')[1].split('/')[1])
             msm_id = int(entry['measurement'].split('measurements')[1].split('/')[1])
@@ -125,6 +190,8 @@ class AnchorChecker():
             self.msm_id_to_prb_id[msm_id] = self.anchor_id_to_prb_id[anchor_id]
 
     def process_anchor_probe_metadata(self):
+        """Fetch metadata from the /probes endpoint for all anchors and check their
+        connectivity status."""
         anchor_probe_metadata = self.fetch_api_endpoint_by_ids('probes', list(self.prb_id_to_anchor_id))
         self.anchor_id_to_status = {self.prb_id_to_anchor_id[e['id']]: e['status']['name']
                                     for e in anchor_probe_metadata}
@@ -132,9 +199,12 @@ class AnchorChecker():
                                      for e in anchor_probe_metadata
                                      if e['status']['name'] == 'Disconnected']
         self.disconnected_anchors = pd.DataFrame(disconnected_anchors_list, columns=['prb_id', 'since'])
+        # Sort by timestamp so the longest disconnected anchors come first.
         self.disconnected_anchors.sort_values('since', inplace=True)
 
     def process_measurement_metadata(self):
+        """Fetch metadata for relevant measurements, check that they are ongoing (for
+        sanity) and categorize based on target anchor connectivity."""
         # Fetch metadata for relevant measurements and check that they are ongoing for
         # sanity.
         msm_metadata = self.fetch_api_endpoint_by_ids('measurements', self.all_msm_ids)
@@ -159,10 +229,11 @@ class AnchorChecker():
             self.ongoing_measurements_to_connected_anchors[msm_id] = anchor_id
 
     def process_measurement_results(self):
+        """Fetch latest measurement results and check if measurements succeeded."""
         queries = list()
         for msm_id in list(self.ongoing_msm_id_to_metadata):
-            future = self.session.get(
-                f'https://atlas.ripe.net/api/v2/measurements/{msm_id}/latest', params={'format': 'json'})
+            future = self.session.get(os.path.join(API_BASE, f'/measurements/{msm_id}/latest'),
+                                      params={'format': 'json'})
             future.msm_id = msm_id
             queries.append(future)
         for future in as_completed(queries):
@@ -174,6 +245,8 @@ class AnchorChecker():
             self.measurement_succeeded[msm_id] = self.eval_msm(metadata['type'], res)
 
     def process_measurement_succeeded(self):
+        """Confirm that number of measurement results is above threshold, calculate some
+        stats and categorize measurement accordingly."""
         for msm_id, (good, succeed_count, fail_count) in self.measurement_succeeded.items():
             metadata = self.ongoing_msm_id_to_metadata[msm_id]
             prb_id = self.msm_id_to_prb_id.get(msm_id, 0)
@@ -202,14 +275,31 @@ class AnchorChecker():
                 self.measurements_to_unknown_anchors.append(line)
 
     def write_data_files(self):
+        """Write detailed data files containing individual measurement IDs."""
         out_path = 'data/anchor-measurements'
         out_file_template = self.date.strftime('%Y%m%d') + '.{name}.csv'
+        # Helper loop to write files to their correct location.
         for name, data in [
-            ('failing-measurements-to-connected-anchors', self.make_df(self.failing_measurements_to_connected_anchors)),
-            ('succeeding-measurements-to-nonconnected-anchors', self.make_df(self.succeeding_measurements_to_nonconnected_anchors)),
-            ('failing-measurements-to-nonconnected-anchors', self.make_df(self.failing_measurements_to_nonconnected_anchors)),
-            ('measurements-to-unknown-anchors', self.make_df(self.measurements_to_unknown_anchors)),
-            ('disconnected-anchors', self.disconnected_anchors)
+            (
+                'failing-measurements-to-connected-anchors',
+                self.make_df(self.failing_measurements_to_connected_anchors)
+            ),
+            (
+                'succeeding-measurements-to-nonconnected-anchors',
+                self.make_df(self.succeeding_measurements_to_nonconnected_anchors)
+            ),
+            (
+                'failing-measurements-to-nonconnected-anchors',
+                self.make_df(self.failing_measurements_to_nonconnected_anchors)
+            ),
+            (
+                'measurements-to-unknown-anchors',
+                self.make_df(self.measurements_to_unknown_anchors)
+            ),
+            (
+                'disconnected-anchors',
+                self.disconnected_anchors
+            )
         ]:
             tmp_path = os.path.join(out_path, name)
             os.makedirs(tmp_path, exist_ok=True)
@@ -218,6 +308,8 @@ class AnchorChecker():
             data.to_csv(out_file, index=False)
 
     def write_stats_file(self):
+        """Write to aggregated stat file which contains one line per run to give an
+        overview."""
         stats = {
             'date': self.date,
             'disconnected_anchors': len(self.disconnected_anchors),
@@ -235,6 +327,7 @@ class AnchorChecker():
 
     @staticmethod
     def make_df(data: list) -> pd.DataFrame:
+        """Helper function to create DataFrames and sort by specific fields."""
         df = pd.DataFrame(data,
                           columns=['msm_id',
                                    'target_anchor_prb_id',
@@ -249,6 +342,7 @@ class AnchorChecker():
 
     @staticmethod
     def eval_traceroute(results: list):
+        """Evaluate traceroute results based on the 'destination_ip_responded' field."""
         succeed_count = 0
         fail_count = 0
         for result in results:
@@ -260,6 +354,7 @@ class AnchorChecker():
 
     @staticmethod
     def eval_ping(results: list):
+        """Evaluate ping results based on the 'rcvd' field."""
         succeed_count = 0
         fail_count = 0
         for result in results:
@@ -271,13 +366,14 @@ class AnchorChecker():
 
     @staticmethod
     def eval_http(results: list):
+        """Evaluate HTTP results based on a HTTP 200 response code."""
         succeed_count = 0
         fail_count = 0
         for result in results:
             # Anchor HTTP measurements should only have one result.
             if len(result['result']) > 1:
-                print('HTTP too many results')
-                print(result)
+                logging.warning('HTTP too many results')
+                logging.warning(result)
             inner_result = result['result'][0]
             if 'res' in inner_result and inner_result['res'] == 200:
                 succeed_count += 1
