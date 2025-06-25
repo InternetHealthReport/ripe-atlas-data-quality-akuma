@@ -23,3 +23,11 @@ additional investigation:
 - **Disconnected anchors:** A simple list of disconnected anchors sorted by
   disconnection time. Anchors that are disconnected for a long time should be
   decommissioned.
+
+## Hallucinating Probes
+
+There are probes that always claim to reach the measurement target. We can identify
+these using measurement [40072013](https://atlas.ripe.net/measurements/40072013/), which
+targets a [purposefully unannounced
+prefix](https://github.com/RIPE-Atlas-Community/ripe-atlas-tips-and-tricks/wiki/nonDFZ-Routing).
+These probes should be fixed or decommissioned, since they produce fake results.

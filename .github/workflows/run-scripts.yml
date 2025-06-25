@@ -9,17 +9,19 @@ jobs:
     name: Process anchor measurements
     runs-on: ubuntu-latest
     steps:
-      - name: checkout repo
+      - name: Checkout repo
         uses: actions/checkout@v4.2.2
-      - name: setup python
+      - name: Setup Python
         uses: actions/setup-python@v5.6.0
         with:
           python-version: 3.13
           cache: pip
-      - name: install python requirements
+      - name: Install Python requirements
         run: pip install -r requirements.txt
-      - name: run anchor measurement pipeline
+      - name: Run anchor measurement pipeline
         run: python3 -m scripts.anchor_measurements
+      - name: Pull again in case parallel job finished
+        run: git pull
       - name: Commit and push if it changed
         run: |-
           git config user.name "Automated"
@@ -27,6 +29,32 @@ jobs:
           git add data/*
           git add stats/*
           timestamp=$(date -u --rfc-3339=date)
-          git commit -m "Latest data: ${timestamp}"
+          git commit -m "Anchor measurements: ${timestamp}"
+          git push
+  hallucinating-probes:
+    name: Process hallucinating probes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+      - name: Setup Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: 3.13
+          cache: pip
+      - name: Install Python requirements
+        run: pip install -r requirements.txt
+      - name: Run hallucinating probes pipeline
+        run: python3 -m scripts.hallucinating_probes
+      - name: Pull again in case parallel job finished
+        run: git pull
+      - name: Commit and push if it changed
+        run: |-
+          git config user.name "Automated"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/*
+          git add stats/*
+          timestamp=$(date -u --rfc-3339=date)
+          git commit -m "Hallucinating probes: ${timestamp}"
           git push
 
