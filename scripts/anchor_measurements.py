@@ -162,13 +162,6 @@ class AnchorChecker():
             res.extend(page['results'])
         return res
 
-    def fetch_latest_measurement_results(self, msm_id: int) -> list:
-        """Fetch the /latest endpoint for the specified measurement ID."""
-        page = self.fetch_url(os.path.join(API_BASE, f'/measurements/{msm_id}/latest'),
-                              {'format': 'json'},
-                              )
-        return page
-
     def process_anchor_metadata(self):
         """Fetch metadata from /anchors endpoint and create anchor/probe ID mappings."""
         anchor_metadata = self.fetch_paginated_url(os.path.join(API_BASE, 'anchors'))
@@ -232,7 +225,7 @@ class AnchorChecker():
         """Fetch latest measurement results and check if measurements succeeded."""
         queries = list()
         for msm_id in list(self.ongoing_msm_id_to_metadata):
-            future = self.session.get(os.path.join(API_BASE, f'/measurements/{msm_id}/latest'),
+            future = self.session.get(os.path.join(API_BASE, f'measurements/{msm_id}/latest'),
                                       params={'format': 'json'})
             future.msm_id = msm_id
             queries.append(future)
