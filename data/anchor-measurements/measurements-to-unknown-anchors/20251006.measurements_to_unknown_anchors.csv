@@ -1,0 +1,7 @@
+msm_id,target_anchor_prb_id,is_mesh,msm_type,af,succeed_count,fail_count,succeed_ratio
+23178658,0,False,http,4,0,122,0.0
+23175070,0,True,http,4,0,718,0.0
+23178657,0,False,ping,4,0,122,0.0
+23175069,0,True,ping,4,1,717,0.001392757660167131
+23178656,0,False,traceroute,4,0,122,0.0
+23175068,0,True,traceroute,4,1,717,0.001392757660167131
