@@ -26,8 +26,10 @@ additional investigation:
 
 ## Hallucinating Probes
 
-There are probes that always claim to reach the measurement target. We can identify
-these using measurement [40072013](https://atlas.ripe.net/measurements/40072013/), which
-targets a [purposefully unannounced
-prefix](https://github.com/RIPE-Atlas-Community/ripe-atlas-tips-and-tricks/wiki/nonDFZ-Routing).
+There are probes that always claim to reach the measurement target. We can
+identify these using measurements
+[40072013](https://atlas.ripe.net/measurements/40072013/) and
+[225117602](https://atlas.ripe.net/measurements/225117602/), which target
+[purposefully unannounced
+prefixes](https://github.com/RIPE-Atlas-Community/ripe-atlas-tips-and-tricks/wiki/nonDFZ-Routing).
 These probes should be fixed or decommissioned, since they produce fake results.

@@ -33,7 +33,6 @@ def main():
 
     hallucating_probes_v6 = [e['prb_id'] for e in results if e['destination_ip_responded']]
 
-    data_output_dir = 'data/hallucinating-probes'
     data_output_file = os.path.join(
         data_output_dir, date.strftime('%Y%m%d') + '.hallucinating_probes_v6.csv'
     )
